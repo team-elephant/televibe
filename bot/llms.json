@@ -1,0 +1,18 @@
+{
+  "llms": [
+    {
+      "id": "8fb5d12b-f443-4d13-89ad-d4a1c26addf1",
+      "name": "MiniMax-M2.5",
+      "endpoint": "https://api.minimax.io/v1",
+      "api_key": "abcd",
+      "created_at": "2026-03-02T12:53:52.437634"
+    },
+    {
+      "id": "c744c6a7-b14f-4186-95ad-af80a2bf01d0",
+      "name": "LLM Test",
+      "endpoint": "https://google.com",
+      "api_key": "abcd",
+      "created_at": "2026-03-02T13:26:50.377828"
+    }
+  ]
+}

@@ -21,15 +21,27 @@ class Config:
 
         load_dotenv(env_file)
 
+        # Telegram configuration
         self.telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
-        self.telegram_allowed_user_id = os.getenv("TELEGRAM_ALLOWED_USER_ID", "")
+        # Support both TELEGRAM_OWNER_ID and TELEGRAM_ALLOWED_USER_ID
+        self.telegram_owner_id = os.getenv("TELEGRAM_OWNER_ID", os.getenv("TELEGRAM_ALLOWED_USER_ID", ""))
+        
+        # Cursor CLI configuration
         self.cursor_api_key = os.getenv("CURSOR_API_KEY", "")
-        # Support both new and old config keys
-        self.cursor_default_project_dir = os.getenv(
-            "CURSOR_DEFAULT_PROJECT_DIR",
-            os.getenv("CURSOR_PROJECT_DIR", "")
-        )
+        self.cursor_default_project_dir = os.getenv("CURSOR_DEFAULT_PROJECT_DIR", "")
         self.cursor_force_mode = os.getenv("CURSOR_FORCE_MODE", "false").lower() == "true"
+
+        # Claude (Anthropic) CLI configuration
+        self.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY", "")
+        self.anthropic_endpoint = os.getenv("ANTHROPIC_ENDPOINT", "https://api.anthropic.com")
+
+        # Codex (OpenAI) CLI configuration
+        self.openai_api_key = os.getenv("OPENAI_API_KEY", "")
+        self.openai_endpoint = os.getenv("OPENAI_ENDPOINT", "https://api.openai.com/v1")
+
+        # Grok (xAI) CLI configuration
+        self.grok_api_key = os.getenv("GROK_API_KEY", "")
+        self.grok_endpoint = os.getenv("GROK_ENDPOINT", "https://api.x.ai/v1")
 
         # Runtime default project (can be changed with /project command)
         self._runtime_default_project: Optional[str] = None
@@ -71,10 +83,10 @@ class Config:
         if not self.telegram_bot_token:
             errors.append("TELEGRAM_BOT_TOKEN is required")
 
-        if not self.telegram_allowed_user_id:
-            errors.append("TELEGRAM_ALLOWED_USER_ID is required")
-        elif not self.telegram_allowed_user_id.isdigit():
-            errors.append("TELEGRAM_ALLOWED_USER_ID must be a numeric string")
+        if not self.telegram_owner_id:
+            errors.append("TELEGRAM_OWNER_ID is required")
+        elif not self.telegram_owner_id.isdigit():
+            errors.append("TELEGRAM_OWNER_ID must be a numeric string")
 
         if not self.cursor_api_key:
             errors.append("CURSOR_API_KEY is required")
@@ -86,16 +98,21 @@ class Config:
 
         return errors
 
-    def is_user_allowed(self, user_id: str) -> bool:
-        """Check if a Telegram user is allowed to use the bot.
+    def is_owner(self, user_id: str) -> bool:
+        """Check if a Telegram user is the owner.
 
         Args:
             user_id: The Telegram user ID to check.
 
         Returns:
-            True if user is allowed, False otherwise.
+            True if user is owner, False otherwise.
         """
-        return str(user_id) == str(self.telegram_allowed_user_id)
+        return str(user_id) == str(self.telegram_owner_id)
+    
+    # Backward compatibility alias
+    def is_user_allowed(self, user_id: str) -> bool:
+        """Check if a Telegram user is allowed to use the bot. Alias for is_owner."""
+        return self.is_owner(user_id)
 
     def get_cursor_command_base(self) -> list[str]:
         """Get the base command for Cursor CLI.
