@@ -328,6 +328,11 @@ async def _execute_agent_prompt(
         prompt: The prompt to execute.
         project_dir: The project directory to work in.
     """
+    from bot.cursor_cli import CursorCLIError
+    from bot.cli_claude import ClaudeCLIError
+    from bot.cli_codex import CodexCLIError
+    from bot.cli_grok import GrokCLIError
+    
     user_id = update.effective_user.id
     logger.info(f"[GROUP] Executing @{agent_name} prompt in {project_dir}")
     
@@ -358,7 +363,7 @@ async def _execute_agent_prompt(
             parse_mode="Markdown"
         )
         
-    except CursorCLIError as e:
+    except (CursorCLIError, ClaudeCLIError, CodexCLIError, GrokCLIError) as e:
         logger.error(f"[GROUP] @{agent_name} error: {str(e)}")
         await status_msg.edit_text(f"❌ @{agent_name} error: {str(e)}")
     except Exception as e:
@@ -650,6 +655,10 @@ async def _execute_prompt_with_agent(
     from bot import agents as agents_module
     from bot import llms as llms_module
     from bot import projects as projects_module
+    from bot.cursor_cli import CursorCLIError
+    from bot.cli_claude import ClaudeCLIError
+    from bot.cli_codex import CodexCLIError
+    from bot.cli_grok import GrokCLIError
     
     user_id = update.effective_user.id
     logger.info(f"[TELEGRAM] Executing prompt from user {user_id} (project: {project_dir}, agent: {agent_id}, force: {force})")
@@ -688,8 +697,8 @@ async def _execute_prompt_with_agent(
         
         await _send_long_message(update, status_msg, full_output, project_dir, agent_name=agent["name"])
 
-    except CursorCLIError as e:
-        logger.error(f"[TELEGRAM] Cursor CLI error: {str(e)}")
+    except (CursorCLIError, ClaudeCLIError, CodexCLIError, GrokCLIError) as e:
+        logger.error(f"[TELEGRAM] CLI error: {str(e)}")
         await status_msg.edit_text(f"❌ Error: {str(e)}")
 
     except Exception as e:
@@ -711,6 +720,11 @@ async def _execute_prompt(
         force: Whether to allow file modifications.
         project_dir: Optional project directory to run in.
     """
+    from bot.cursor_cli import CursorCLIError
+    from bot.cli_claude import ClaudeCLIError
+    from bot.cli_codex import CodexCLIError
+    from bot.cli_grok import GrokCLIError
+    
     user_id = update.effective_user.id
     logger.info(f"[TELEGRAM] Executing prompt from user {user_id} (project: {project_dir}, force: {force})")
     
@@ -746,8 +760,8 @@ async def _execute_prompt(
         
         await _send_long_message(update, status_msg, full_output, effective_project_dir)
 
-    except CursorCLIError as e:
-        logger.error(f"[TELEGRAM] Cursor CLI error: {str(e)}")
+    except (CursorCLIError, ClaudeCLIError, CodexCLIError, GrokCLIError) as e:
+        logger.error(f"[TELEGRAM] CLI error: {str(e)}")
         await status_msg.edit_text(f"❌ Error: {str(e)}")
 
     except Exception as e:
