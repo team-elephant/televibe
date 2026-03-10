@@ -55,7 +55,8 @@ class CodexCLI:
             CodexCLIError: If the execution fails.
         """
         use_force = force or self.force
-        await self._execute_codex(prompt, use_force, timeout)
+        async for line in self._execute_codex(prompt, use_force, timeout):
+            yield line
 
     async def _execute_codex(
         self,
@@ -123,11 +124,11 @@ class CodexCLI:
         Returns:
             List of command arguments.
         """
-        # Codex CLI command format
-        cmd = ["codex"]
+        # Codex CLI command format - use 'exec' subcommand for non-interactive mode
+        cmd = ["codex", "exec"]
         
         if force:
-            cmd.append("--force")
+            cmd.append("--dangerously-bypass-approvals-and-sandbox")
         
         if self.model:
             cmd.extend(["--model", self.model])

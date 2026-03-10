@@ -71,6 +71,10 @@ def main() -> None:
     # Group chat commands
     application.add_handler(CommandHandler("link", handlers.link_command))
     application.add_handler(CommandHandler("unlink", handlers.unlink_command))
+    application.add_handler(CommandHandler("models", handlers.group_models_command))
+    application.add_handler(CommandHandler("history", handlers.group_history_command))
+    application.add_handler(CommandHandler("memory", handlers.group_memory_command))
+    application.add_handler(CommandHandler("clearmemory", handlers.group_clear_memory_command))
 
     # Register message handler for group chats (must be after commands)
     # This handles tagged messages like @cursor, @claude, etc.

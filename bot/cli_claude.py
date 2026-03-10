@@ -55,7 +55,8 @@ class ClaudeCLI:
             ClaudeCLIError: If the execution fails.
         """
         use_force = force or self.force
-        await self._execute_claude(prompt, use_force, timeout)
+        async for line in self._execute_claude(prompt, use_force, timeout):
+            yield line
 
     async def _execute_claude(
         self,

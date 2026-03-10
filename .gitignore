@@ -21,3 +21,6 @@ Thumbs.db
 
 # Docs
 docs/
+
+# Memory
+bot/memory/

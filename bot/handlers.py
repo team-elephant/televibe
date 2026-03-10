@@ -17,6 +17,9 @@ from bot.cli_grok import GrokCLIError
 from bot import keyboard
 from bot import callbacks
 from bot import groups as groups_module
+from bot import models as models_module
+from bot import history as history_module
+from bot import conversations as conversations_module
 
 logger = logging.getLogger(__name__)
 
@@ -269,6 +272,102 @@ async def group_status_command(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text(status_msg, parse_mode="Markdown")
 
 
+async def group_models_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /models command in group chat - show model preferences.
+    """
+    if not _is_owner(update):
+        return
+
+    # Get group ID
+    group_id = _get_group_id(update)
+    if not group_id:
+        await update.message.reply_text("❌ This command must be used in a group chat.")
+        return
+
+    models_msg = models_module.get_models_status(group_id)
+    
+    await update.message.reply_text(models_msg, parse_mode="Markdown")
+
+
+async def group_history_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /history command in group chat - show execution history.
+    """
+    if not _is_owner(update):
+        return
+
+    # Get group ID
+    group_id = _get_group_id(update)
+    if not group_id:
+        await update.message.reply_text("❌ This command must be used in a group chat.")
+        return
+
+    history_msg = history_module.get_history_status(group_id)
+    
+    await update.message.reply_text(history_msg, parse_mode="Markdown")
+
+
+async def group_memory_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /memory command in group chat - show conversation memory.
+    """
+    if not _is_owner(update):
+        return
+
+    # Get group ID
+    group_id = _get_group_id(update)
+    if not group_id:
+        await update.message.reply_text("❌ This command must be used in a group chat.")
+        return
+
+    # Check for optional agent argument
+    agent = None
+    if context.args:
+        agent_arg = context.args[0].lower().replace("@", "")
+        if agent_arg in ["cursor", "claude", "codex", "grok"]:
+            agent = agent_arg
+
+    memory_msg = conversations_module.format_conversation_summary(group_id, agent)
+    
+    await update.message.reply_text(memory_msg, parse_mode="Markdown")
+
+
+async def group_clear_memory_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /clearmemory command in group chat - clear conversation memory.
+    """
+    if not _is_owner(update):
+        return
+
+    # Get group ID
+    group_id = _get_group_id(update)
+    if not group_id:
+        await update.message.reply_text("❌ This command must be used in a group chat.")
+        return
+
+    # Check for optional agent argument
+    if context.args:
+        agent_arg = context.args[0].lower().replace("@", "")
+        if agent_arg in ["cursor", "claude", "codex", "grok"]:
+            # Clear specific agent memory
+            success = conversations_module.clear_agent_conversation(group_id, agent_arg)
+            if success:
+                await update.message.reply_text(
+                    f"🧠 Cleared conversation memory for @{agent_arg}",
+                    parse_mode="Markdown"
+                )
+            else:
+                await update.message.reply_text(
+                    f"ℹ️ No conversation memory to clear for @{agent_arg}",
+                    parse_mode="Markdown"
+                )
+            return
+    
+    # Clear all agent memories
+    conversations_module.clear_all_conversations(group_id)
+    await update.message.reply_text(
+        "🧠 Cleared all conversation memory for this group",
+        parse_mode="Markdown"
+    )
+
+
 # ============================================================================
 # Tag-based Message Handling
 # ============================================================================
@@ -293,6 +392,32 @@ def detect_agent_tag(text: str) -> Tuple[Optional[str], str]:
     return None, text
 
 
+def detect_change_model_command(text: str) -> Tuple[Optional[str], Optional[str]]:
+    """Detect /change-model command in tagged message.
+    
+    Syntax: @agent /change-model <model-id>
+    
+    Args:
+        text: The message text.
+        
+    Returns:
+        Tuple of (agent_name, model). Both None if no change-model command found.
+    """
+    text = text.strip()
+    
+    for tag, agent_name in AGENT_TAGS.items():
+        if text.startswith(tag):
+            # Check for /change-model command after the tag
+            remaining = text[len(tag):].strip()
+            if remaining.startswith("/change-model"):
+                # Extract model id
+                model = remaining[len("/change-model"):].strip()
+                if model:
+                    return agent_name, model
+    
+    return None, None
+
+
 async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle messages in group chats - detect agent tags.
     
@@ -301,6 +426,7 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
     - @claude create a test file
     - @codex fix the bug
     - @grok explain this function
+    - @claude /change-model opus-4-6
     """
     logger.info(f"[GROUP] Received message: {update.message.text if update.message else 'No message'}")
     
@@ -319,14 +445,23 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
     if not group_id:
         return  # Not a group chat
     
+    message_text = update.message.text
+    
+    # First check for /change-model command
+    change_agent, change_model = detect_change_model_command(message_text)
+    if change_agent and change_model:
+        # Handle model change request
+        await _handle_change_model(update, group_id, change_agent, change_model)
+        return
+    
     # Check if group is linked to a project
     project_dir = groups_module.get_project_for_group(group_id)
     logger.info(f"[GROUP] project_dir={project_dir} for group {group_id}")
     if not project_dir:
         return  # Group not linked
     
-    # Detect agent tag
-    agent_name, prompt = detect_agent_tag(update.message.text)
+    # Detect agent tag for regular prompts
+    agent_name, prompt = detect_agent_tag(message_text)
     logger.info(f"[GROUP] agent_name={agent_name}, prompt={prompt[:50] if prompt else 'empty'}")
     if not agent_name or not prompt:
         return  # No valid tag found
@@ -335,15 +470,20 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
     user_id = update.effective_user.id
     logger.info(f"[GROUP] Tagged message from user {user_id}: @{agent_name} {prompt[:50]}...")
     
+    # Get the current model for this agent in this group
+    model = models_module.get_current_model(group_id, agent_name)
+    
     # Execute the prompt with the specified agent
-    await _execute_agent_prompt(update, agent_name, prompt, project_dir)
+    await _execute_agent_prompt(update, agent_name, prompt, project_dir, model=model, group_id=group_id)
 
 
 async def _execute_agent_prompt(
     update: Update,
     agent_name: str,
     prompt: str,
-    project_dir: str
+    project_dir: str,
+    model: Optional[str] = None,
+    group_id: Optional[str] = None
 ) -> None:
     """Execute a prompt with a specific agent.
     
@@ -352,9 +492,28 @@ async def _execute_agent_prompt(
         agent_name: Name of the agent (cursor, claude, codex, grok).
         prompt: The prompt to execute.
         project_dir: The project directory to work in.
+        model: The model to use (optional).
+        group_id: The Telegram group ID (optional, for history tracking).
     """
     user_id = update.effective_user.id
-    logger.info(f"[GROUP] Executing @{agent_name} prompt in {project_dir}")
+    logger.info(f"[GROUP] Executing @{agent_name} prompt in {project_dir} with model={model}")
+    
+    # Track execution in history if group_id provided
+    execution_id = None
+    if group_id:
+        execution_id = history_module.add_execution(
+            group_id=group_id,
+            agent=agent_name,
+            prompt=prompt,
+            model=model,
+            status="started"
+        )
+        
+        # Load conversation context and prepend to prompt
+        context = conversations_module.get_context_for_agent(group_id, agent_name)
+        if context:
+            prompt = f"{context}\n\nCurrent Request: {prompt}"
+            logger.info(f"[GROUP] Added conversation context ({len(context)} chars) to prompt")
     
     status_msg = await update.message.reply_text(
         f"⏳ @{agent_name} is processing your request...",
@@ -362,8 +521,8 @@ async def _execute_agent_prompt(
     )
     
     try:
-        # Build the CLI based on agent type
-        cli = _build_agent_cli(agent_name, project_dir)
+        # Build the CLI based on agent type, passing the model
+        cli = _build_agent_cli(agent_name, project_dir, model=model)
         
         output_parts = []
         async for line in cli.execute(prompt, force=False):
@@ -383,20 +542,122 @@ async def _execute_agent_prompt(
             parse_mode="Markdown"
         )
         
+        # Save conversation to memory if group_id provided
+        if group_id:
+            # Add user message
+            original_prompt = prompt
+            if context:
+                # Extract original prompt from the full prompt
+                if "Current Request:" in prompt:
+                    original_prompt = prompt.split("Current Request:")[1].strip()
+            
+            conversations_module.add_message(
+                group_id=group_id,
+                agent=agent_name,
+                role="user",
+                content=original_prompt
+            )
+            
+            # Add assistant response (truncated if too long)
+            response_content = full_output
+            if len(response_content) > 4000:
+                response_content = response_content[:4000] + "...(truncated)"
+            
+            conversations_module.add_message(
+                group_id=group_id,
+                agent=agent_name,
+                role="assistant",
+                content=response_content
+            )
+        
+        # Update history with completion
+        if group_id and execution_id:
+            # Try to extract modified files from output
+            files_modified = _extract_modified_files(full_output)
+            history_module.update_execution(
+                group_id=group_id,
+                execution_id=execution_id,
+                status="completed",
+                files_modified=files_modified
+            )
+        
     except (CursorCLIError, GrokCLIError, ClaudeCLIError, CodexCLIError) as e:
         logger.error(f"[GROUP] @{agent_name} error: {str(e)}")
         await status_msg.edit_text(f"❌ @{agent_name} error: {str(e)}")
+        
+        # Update history with failure
+        if group_id and execution_id:
+            history_module.update_execution(
+                group_id=group_id,
+                execution_id=execution_id,
+                status="failed",
+                error=str(e)
+            )
+        
     except Exception as e:
         logger.error(f"[GROUP] Unexpected error: {str(e)}")
         await status_msg.edit_text(f"❌ Unexpected error: {str(e)}")
+        
+        # Update history with failure
+        if group_id and execution_id:
+            history_module.update_execution(
+                group_id=group_id,
+                execution_id=execution_id,
+                status="failed",
+                error=str(e)
+            )
 
 
-def _build_agent_cli(agent_name: str, project_dir: str):
+async def _handle_change_model(
+    update: Update,
+    group_id: str,
+    agent_name: str,
+    model: str
+) -> None:
+    """Handle /change-model command for an agent.
+    
+    Args:
+        update: Telegram update object.
+        group_id: The Telegram group ID.
+        agent_name: Name of the agent (cursor, claude, codex, grok).
+        model: The model identifier to change to.
+    """
+    logger.info(f"[GROUP] @{agent_name} /change-model {model} in group {group_id}")
+    
+    # Validate model is valid for this agent type
+    if not models_module.is_valid_model(agent_name, model):
+        available = models_module.get_available_models(agent_name)
+        available_str = ", ".join(available) if available else "none"
+        await update.message.reply_text(
+            f"❌ Invalid model '{model}' for @{agent_name}.\n\n"
+            f"Available models: {available_str}",
+            parse_mode="Markdown"
+        )
+        return
+    
+    # Set the new model
+    success = models_module.set_model(group_id, agent_name, model)
+    
+    if success:
+        display_name = models_module.get_model_display_name(agent_name, model)
+        await update.message.reply_text(
+            f"✅ @{agent_name} model changed to {display_name}",
+            parse_mode="Markdown"
+        )
+    else:
+        await update.message.reply_text(
+            f"❌ Failed to change @{agent_name} model",
+            parse_mode="Markdown"
+        )
+
+
+def _build_agent_cli(agent_name: str, project_dir: str, model: Optional[str] = None):
     """Build the appropriate CLI instance for the specified agent.
     
     Args:
         agent_name: Name of the agent (cursor, claude, codex, grok).
         project_dir: The project directory.
+        model: The model to use (optional).
         
     Returns:
         CLI instance (CursorCLI, ClaudeCLI, CodexCLI, or GrokCLI).
@@ -408,23 +669,23 @@ def _build_agent_cli(agent_name: str, project_dir: str):
     
     if agent_name == "cursor":
         # Use Cursor CLI wrapper
-        return CursorCLI(project_dir=project_dir)
+        return CursorCLI(project_dir=project_dir, model=model)
     
     elif agent_name == "claude":
         # Use Claude CLI wrapper
-        return ClaudeCLI(project_dir=project_dir)
+        return ClaudeCLI(project_dir=project_dir, model=model)
     
     elif agent_name == "codex":
         # Use Codex CLI wrapper
-        return CodexCLI(project_dir=project_dir)
+        return CodexCLI(project_dir=project_dir, model=model)
     
     elif agent_name == "grok":
         # Use Grok CLI wrapper (defaults to API)
-        return GrokCLI(project_dir=project_dir)
+        return GrokCLI(project_dir=project_dir, model=model)
     
     else:
         # Default to cursor
-        return CursorCLI(project_dir=project_dir)
+        return CursorCLI(project_dir=project_dir, model=model)
 
 
 # ============================================================================
@@ -466,6 +727,47 @@ def _is_owner(update: Update) -> bool:
     
     user_id = str(update.message.from_user.id)
     return config.is_owner(user_id)
+
+
+def _extract_modified_files(output: str) -> list:
+    """Extract modified file paths from CLI output.
+    
+    This is a best-effort extraction that looks for common patterns
+    in CLI output indicating file modifications.
+    
+    Args:
+        output: The CLI output text.
+        
+    Returns:
+        List of file paths that may have been modified.
+    """
+    import re
+    
+    files = []
+    
+    # Common patterns for file modifications
+    patterns = [
+        # "Modified: /path/to/file"
+        r'[Mm]odified:\s*([^\s\n]+)',
+        # "Created: /path/to/file"  
+        r'[Cc]reated:\s*([^\s\n]+)',
+        # "Edited: /path/to/file"
+        r'[Ee]dited:\s*([^\s\n]+)',
+        # "Writing to /path/to/file"
+        r'[Ww]riting to\s+([^\s\n]+)',
+        # "File: /path/to/file"
+        r'[Ff]ile:\s*([^\s\n]+)',
+    ]
+    
+    for pattern in patterns:
+        matches = re.findall(pattern, output)
+        for match in matches:
+            # Clean up the path
+            path = match.strip()
+            if path and path not in files:
+                files.append(path)
+    
+    return files
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -796,14 +1098,9 @@ async def _send_long_message(
         project_dir: The project directory used (for context).
         agent_name: The agent name used (for context).
     """
-    parts = []
-    if agent_name:
-        parts.append(f"🤖 Agent: {agent_name}")
-    if project_dir:
-        parts.append(f"📁 Project: `{project_dir}`")
-    
-    context_info = "\n\n" + "\n".join(parts) if parts else ""
-    await status_msg.edit_text(f"✅ Done! Sending response...{context_info}", parse_mode="Markdown")
+    # Change status to show agent is thinking
+    thinking_text = f"@{agent_name} thinking..." if agent_name else "thinking..."
+    await status_msg.edit_text(thinking_text, parse_mode="Markdown")
 
     if len(text) <= MAX_MESSAGE_LENGTH:
         await update.message.reply_text(text)
